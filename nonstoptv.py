@@ -6,14 +6,39 @@ import subprocess
 from pathlib import Path
 
 
-# Settings
-BUTTON_PIN = 21
-USB_PATH = Path("/media/pi/USB")
-STATE_FILE = Path("/home/pi/videofolder")
-VIDEO_LOOPER_CONFIG = Path("/boot/video_looper.ini")
-VIDEO_LOOPER_RELOAD_SCRIPT = Path("/home/pi/pi_video_looper/reload.sh")
-VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
+####################
+##### SETTINGS #####
+####################
 
+# Paths
+USB_PATH = Path("/media/pi/USB")
+STATE_FILE = Path("/home/pi/nonstoptv.ini")
+
+# Config
+VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
+RANDOM = True
+
+# GPIO
+GPIO.setmode(GPIO.BCM)
+BUTTON_NEXTFOLDER = 21
+BUTTON_NEXTVIDEO = 26
+BUTTON_PAUSE = 20
+BUTTON_LANGUAGE = 19
+BUTTON_SKP10 = 16
+BUTTON_REW10 = 13
+GPIO.setup(BUTTON_NEXTFOLDER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BUTTON_NEXTVIDEO, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BUTTON_PAUSE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BUTTON_LANGUAGE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BUTTON_SKP10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BUTTON_REW10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+
+#####################
+##### FUNCTIONS #####
+#####################
+
+# Wait for Mounted USB
 def is_usb_ready():
     if not USB_PATH.exists():
         return False
@@ -26,15 +51,7 @@ def is_usb_ready():
 
     return False
 
-while not is_usb_ready():
-    print("Warte auf USB-Stick...")
-    time.sleep(2)
-
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-
-# --- Hilfsfunktionen ---
+# Get Valid Video Directories
 def get_video_dirs():
     valid_dirs = []
 
@@ -62,6 +79,7 @@ def get_video_dirs():
 
     return sorted(valid_dirs)
 
+# TO DO REMOVE
 def load_state(dirs):
     if STATE_FILE.exists():
         folder = STATE_FILE.read_text().strip()
@@ -69,24 +87,11 @@ def load_state(dirs):
             return dirs.index(folder)
     return 0
 
+# TO DO REMOVE
 def save_state(index, dirs):
     STATE_FILE.write_text(dirs[index])
 
-def restart_video_looper():
-    if not VIDEO_LOOPER_RELOAD_SCRIPT.exists():
-        print(f"Video Looper Reload Script nicht gefunden: {VIDEO_LOOPER_RELOAD_SCRIPT}")
-        return
-
-    try:
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            subprocess.run(["bash", str(VIDEO_LOOPER_RELOAD_SCRIPT)], check=True, timeout=15)
-        else:
-            subprocess.run(["sudo", "-n", "bash", str(VIDEO_LOOPER_RELOAD_SCRIPT)], check=True, timeout=15)
-
-        print("Video Looper neu initialisiert")
-    except Exception as error:
-        print(f"Konnte Video Looper nicht neu initialisieren: {error}")
-
+# TO DO REMOVE
 def set_video_looper_path(folder_name):
     if not VIDEO_LOOPER_CONFIG.exists():
         print(f"Video Looper Config nicht gefunden: {VIDEO_LOOPER_CONFIG}")
@@ -137,37 +142,71 @@ def set_video_looper_path(folder_name):
 
     restart_video_looper()
 
+# Start VLC Player
+def start_vlc_player():
+    video_path = USB_PATH / dirs[current_index]
+    vlc_command = [
+        "vlc",
+        "--loop",
+        "--fullscreen",
+        "--no-video-title-show",
+        str(video_path),
+    ]
+    subprocess.Popen(vlc_command)
 
-# Initializing
+# Restart VLC Player
+def restart_vlc_player():
+    subprocess.run(["pkill", "vlc"])
+    time.sleep(1)
+    start_vlc_player()
+
+
+##########################
+##### INITIALISATION #####
+##########################
+
+# Wait for USB Stick to be Mounted
+while not is_usb_ready():
+    print("Waiting for Stick...")
+    time.sleep(1)
+
+# Get Video Directories
 dirs = get_video_dirs()
 while not dirs:
-    print("Keine Ordner gefunden! Warte...")
+    print("Searching for Folders...")
     time.sleep(2)
     dirs = get_video_dirs()
 
+# Load Current Video Directory
 current_index = load_state(dirs)
-print(f"Start mit Ordner: {dirs[current_index]}")
+
+# Start VLC Player
+start_vlc_player()
 
 
-# Loop
+##########################
+##### BUTTON CONTROL #####
+##########################
+
 try:
     while True:
         try:
-            if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-                # nächster Ordner
-                current_index = (current_index + 1) % len(dirs)
-                save_state(current_index, dirs)
-                set_video_looper_path(dirs[current_index])
-                print(f"Taster gedrückt → Wechsel zu: {dirs[current_index]}")
 
-                # Entprellen + warten bis Taster losgelassen wird
-                time.sleep(0.4)
-                while GPIO.input(BUTTON_PIN) == GPIO.LOW:
-                    time.sleep(0.05)
+            # Button: Next Folder
+            if GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
+                current_index = (current_index + 1) % len(dirs)
+                print(f"Button pressed → Switch to: {dirs[current_index]}")
+                # save_state(current_index, dirs)
+                # set_video_looper_path(dirs[current_index])
+                restart_vlc_player()
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
+                    time.sleep(0.1)
 
             time.sleep(0.1)
         except Exception as error:
-            print(f"Fehler im Loop: {error}")
+            print(f"ERROR: {error}")
             time.sleep(1)
 
 finally:
