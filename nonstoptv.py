@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import RPi.GPIO as GPIO
 import time
+import os
+import subprocess
 from pathlib import Path
 
 
@@ -8,9 +10,23 @@ from pathlib import Path
 BUTTON_PIN = 21
 USB_PATH = Path("/media/pi/USB")
 STATE_FILE = Path("/home/pi/videofolder")
+VIDEO_LOOPER_CONFIG = Path("/boot/video_looper.ini")
+VIDEO_LOOPER_RELOAD_SCRIPT = Path("/home/pi/pi_video_looper/reload.sh")
 VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
 
-while not USB_PATH.exists() or not any(USB_PATH.iterdir()):
+def is_usb_ready():
+    if not USB_PATH.exists():
+        return False
+
+    try:
+        for _ in USB_PATH.iterdir():
+            return True
+    except OSError:
+        return False
+
+    return False
+
+while not is_usb_ready():
     print("Warte auf USB-Stick...")
     time.sleep(2)
 
@@ -22,16 +38,24 @@ GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 def get_video_dirs():
     valid_dirs = []
 
-    for folder in USB_PATH.iterdir():
+    try:
+        folders = list(USB_PATH.iterdir())
+    except OSError:
+        return valid_dirs
+
+    for folder in folders:
         if not folder.is_dir():
             continue
 
         found = False
-        for subpath in folder.rglob("*"):
-            if subpath.is_file() and subpath.suffix.lower() in VIDEO_EXTENSIONS:
-                valid_dirs.append(folder.name)
-                found = True
-                break
+        try:
+            for subpath in folder.rglob("*"):
+                if subpath.is_file() and subpath.suffix.lower() in VIDEO_EXTENSIONS:
+                    valid_dirs.append(folder.name)
+                    found = True
+                    break
+        except OSError:
+            continue
 
         if found:
             continue
@@ -48,12 +72,78 @@ def load_state(dirs):
 def save_state(index, dirs):
     STATE_FILE.write_text(dirs[index])
 
+def restart_video_looper():
+    if not VIDEO_LOOPER_RELOAD_SCRIPT.exists():
+        print(f"Video Looper Reload Script nicht gefunden: {VIDEO_LOOPER_RELOAD_SCRIPT}")
+        return
+
+    try:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            subprocess.run(["bash", str(VIDEO_LOOPER_RELOAD_SCRIPT)], check=True, timeout=15)
+        else:
+            subprocess.run(["sudo", "-n", "bash", str(VIDEO_LOOPER_RELOAD_SCRIPT)], check=True, timeout=15)
+
+        print("Video Looper neu initialisiert")
+    except Exception as error:
+        print(f"Konnte Video Looper nicht neu initialisieren: {error}")
+
+def set_video_looper_path(folder_name):
+    if not VIDEO_LOOPER_CONFIG.exists():
+        print(f"Video Looper Config nicht gefunden: {VIDEO_LOOPER_CONFIG}")
+        return
+
+    new_path = str(USB_PATH / folder_name)
+    lines = VIDEO_LOOPER_CONFIG.read_text().splitlines(True)
+    replaced = False
+
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped.startswith("path"):
+            continue
+
+        if "=" not in stripped:
+            continue
+
+        key = stripped.split("=", 1)[0].strip()
+        if key != "path":
+            continue
+
+        indentation = line[: len(line) - len(stripped)]
+        lines[index] = f"{indentation}path = {new_path}\n"
+        replaced = True
+        break
+
+    if not replaced:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = f"{lines[-1]}\n"
+        lines.append(f"path = {new_path}\n")
+
+    new_text = "".join(lines)
+    try:
+        VIDEO_LOOPER_CONFIG.write_text(new_text)
+    except PermissionError:
+        try:
+            subprocess.run(
+                ["sudo", "-n", "tee", str(VIDEO_LOOPER_CONFIG)],
+                input=new_text.encode("utf-8"),
+                check=True,
+                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            print(f"Keine Berechtigung zum Schreiben: {VIDEO_LOOPER_CONFIG}")
+            return
+
+    restart_video_looper()
+
 
 # Initializing
 dirs = get_video_dirs()
-if not dirs:
-    print("Keine Ordner gefunden!")
-    exit(1)
+while not dirs:
+    print("Keine Ordner gefunden! Warte...")
+    time.sleep(2)
+    dirs = get_video_dirs()
 
 current_index = load_state(dirs)
 print(f"Start mit Ordner: {dirs[current_index]}")
@@ -62,18 +152,23 @@ print(f"Start mit Ordner: {dirs[current_index]}")
 # Loop
 try:
     while True:
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            # nächster Ordner
-            current_index = (current_index + 1) % len(dirs)
-            save_state(current_index, dirs)
-            print(f"Taster gedrückt → Wechsel zu: {dirs[current_index]}")
+        try:
+            if GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                # nächster Ordner
+                current_index = (current_index + 1) % len(dirs)
+                save_state(current_index, dirs)
+                set_video_looper_path(dirs[current_index])
+                print(f"Taster gedrückt → Wechsel zu: {dirs[current_index]}")
 
-            # Entprellen + warten bis Taster losgelassen wird
-            time.sleep(0.4)
-            while GPIO.input(BUTTON_PIN) == GPIO.LOW:
-                time.sleep(0.05)
+                # Entprellen + warten bis Taster losgelassen wird
+                time.sleep(0.4)
+                while GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                    time.sleep(0.05)
 
-        time.sleep(0.1)
+            time.sleep(0.1)
+        except Exception as error:
+            print(f"Fehler im Loop: {error}")
+            time.sleep(1)
 
 finally:
     GPIO.cleanup()
