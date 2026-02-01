@@ -16,14 +16,12 @@ from pathlib import Path
 
 # Paths
 USB_PATH = Path("/media/pi/USB")
-STATE_DIR = Path("/home/pi/")
-STATE_FILE = STATE_DIR / "nonstoptv-config.ini"
-LOG_FILE = STATE_DIR / "nonstoptv-report.log"
+WORKING_PATH = Path("/home/pi/")
+STATE_FILE = WORKING_PATH / "nonstoptv-config.ini"
+LOG_FILE = WORKING_PATH / "nonstoptv-report.log"
 
 # Config
-VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
-RANDOM = True
-VOLUME = 100
+VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4"]
 
 # GPIO
 GPIO.setmode(GPIO.BCM)
@@ -255,6 +253,33 @@ except Exception:
     pass
 
 log_message("Script Started")
+
+# Load Config
+random_text = ini_get("random", None)
+if random_text is None:
+    RANDOM = True
+    ini_set("random", "true")
+elif random_text.lower() in ["1", "true", "yes", "on"]:
+    RANDOM = True
+elif random_text.lower() in ["0", "false", "no", "off"]:
+    RANDOM = False
+else:
+    RANDOM = True
+    ini_set("random", "true")
+
+volume_text = ini_get("volume", None)
+volume_value = -1
+if volume_text is None:
+    volume_value = 100
+    ini_set("volume", "100")
+elif volume_text.isdigit():
+    volume_value = int(volume_text)
+
+if volume_value < 0 or volume_value > 100:
+    VOLUME = 100
+    ini_set("volume", "100")
+else:
+    VOLUME = volume_value
 
 # Wait for USB Stick to be Mounted
 while not is_usb_ready():
