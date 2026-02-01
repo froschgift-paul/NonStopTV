@@ -17,8 +17,8 @@ from pathlib import Path
 # Paths
 USB_PATH = Path("/media/pi/USB")
 STATE_DIR = Path("/home/pi/")
-STATE_FILE = STATE_DIR / "nonstoptv.ini"
-LOG_FILE = STATE_DIR / "nonstoptv_vlc.log"
+STATE_FILE = STATE_DIR / "nonstoptv-config.ini"
+LOG_FILE = STATE_DIR / "nonstoptv-report.log"
 
 # Config
 VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
@@ -44,6 +44,14 @@ GPIO.setup(BUTTON_REW10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 #####################
 ##### FUNCTIONS #####
 #####################
+
+def log_message(message):
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with LOG_FILE.open("ab") as log:
+            log.write(f"--- {timestamp} | {message}\n".encode("utf-8", errors="ignore"))
+    except Exception:
+        pass
 
 # Wait for Mounted USB
 def is_usb_ready():
@@ -118,7 +126,7 @@ def ini_get(key, default_value = ""):
 # Write INI State
 def ini_set(key, value):
     if STATE_FILE.exists() and STATE_FILE.is_dir():
-        print(f"State file path is a directory: {STATE_FILE}")
+        log_message(f"State File Is A Directory: {STATE_FILE}")
         return False
 
     value_text = str(value).replace("\r", "").replace("\n", " ")
@@ -169,12 +177,7 @@ def ini_set(key, value):
         os.replace(temp_file, STATE_FILE)
         return True
     except Exception as error:
-        print(f"Could not write state file: {STATE_FILE} ({error})")
-        try:
-            with LOG_FILE.open("ab") as log:
-                log.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} STATE WRITE FAILED: {STATE_FILE} ({error}) ---\n".encode("utf-8", errors="ignore"))
-        except Exception:
-            pass
+        log_message(f"State Write Failed: {STATE_FILE} ({error})")
         try:
             if temp_file.exists():
                 temp_file.unlink()
@@ -200,7 +203,7 @@ def save_state(index, dirs):
 # (Re)Start VLC Player
 def start_vlc_player(dir, restart =False):
     if restart:
-        subprocess.run(["pkill", "vlc"])
+        subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     video_path = USB_PATH / dir
     vlc_command = [
@@ -215,37 +218,55 @@ def start_vlc_player(dir, restart =False):
         vlc_command.insert(4, "--random")
 
     try:
+        log_message(f"Starting With Folder: {dir}")
         with LOG_FILE.open("ab") as log:
-            header = f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} START VLC: {' '.join(vlc_command)} ---\n"
-            log.write(header.encode("utf-8", errors="ignore"))
             process = subprocess.Popen(vlc_command, stdout=log, stderr=log)
-        print(f"VLC started (pid={process.pid})")
+        log_message(f"VLC Started (pid={process.pid})")
     except Exception as error:
-        print(f"Could not start VLC: {error}")
+        log_message(f"VLC Start Failed: {error}")
 
+# Kill Running Instances of This Script
+def kill_other_instances():
+    try:
+        subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(["pgrep", "-f", "/boot/nonstoptv.py"], capture_output=True, text=True)
+        for pid_text in result.stdout.split():
+            if not pid_text.isdigit():
+                continue
+            pid = int(pid_text)
+            if pid == os.getpid():
+                continue
+            os.kill(pid, 15)
+    except Exception:
+        pass
 
 ##########################
 ##### INITIALISATION #####
 ##########################
 
+# Kill Other Instances
+kill_other_instances()
+
+# Reset Log File
+try:
+    with LOG_FILE.open("wb") as log:
+        log.write(b"")
+except Exception:
+    pass
+
+log_message("Script Started")
+
 # Wait for USB Stick to be Mounted
 while not is_usb_ready():
-    print("Waiting for Stick...")
+    log_message("Waiting For USB")
     time.sleep(1)
 
 # Get Video Directories
 dirs = list_video_folders()
 while not dirs:
-    print("Searching for Folders...")
+    log_message("Searching For Folders")
     time.sleep(2)
     dirs = list_video_folders()
-
-# Delete Old Log File
-if LOG_FILE.exists():
-    try:
-        LOG_FILE.unlink()
-    except OSError:
-        pass
 
 # Wait For X11 Session
 display_value = os.environ.get("DISPLAY", "")
@@ -275,7 +296,7 @@ try:
             # Button: Next Folder
             if GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
                 current_index = (current_index + 1) % len(dirs)
-                print(f"Switch Folder to: {dirs[current_index]}")
+                log_message(f"Switch Folder: {dirs[current_index]}")
                 save_state(current_index, dirs)
                 start_vlc_player(dirs[current_index], restart=True)
 
@@ -285,8 +306,9 @@ try:
 
             time.sleep(0.1)
         except Exception as error:
-            print(f"ERROR: {error}")
+            log_message(f"Error: {error}")
             time.sleep(1)
 
 finally:
+    log_message("Script Terminated")
     GPIO.cleanup()
