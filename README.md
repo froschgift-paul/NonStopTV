@@ -60,3 +60,4 @@ Troubleshooting: Note that you need to create a new mounting point if you change
 
 ### 6. Enjoy
 Reboot and you should be ready to go.
+(After first Launch you will find an .ini and a .log file in `/home/pi/` where you can view and tweak details).

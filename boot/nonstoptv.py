@@ -29,8 +29,8 @@ BUTTON_NEXTFOLDER = 21
 BUTTON_NEXTVIDEO = 26
 BUTTON_PAUSE = 20
 BUTTON_LANGUAGE = 19
-BUTTON_SKP10 = 16
-BUTTON_REW10 = 13
+BUTTON_SKP10 = 13
+BUTTON_REW10 = 16
 GPIO.setup(BUTTON_NEXTFOLDER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_NEXTVIDEO, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_PAUSE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -327,6 +327,51 @@ try:
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
+                    time.sleep(0.1)
+
+            # Button: Next Video
+            if GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
+                log_message("Next Video")
+                subprocess.run(["xdotool", "key", "n"])
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
+                    time.sleep(0.1)
+            
+            # Button: Pause/Play
+            if GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
+                log_message("Pause/Play")
+                subprocess.run(["xdotool", "key", "space"])
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
+                    time.sleep(0.1)
+            
+            # Button: Language
+            if GPIO.input(BUTTON_LANGUAGE) == GPIO.LOW:
+                log_message("Change Audio Track")
+                subprocess.run(["xdotool", "key", "b"])
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_LANGUAGE) == GPIO.LOW:
+                    time.sleep(0.1)
+            
+            # Button: Skip 10 Seconds
+            if GPIO.input(BUTTON_SKP10) == GPIO.LOW:
+                log_message("Skip Forward 10 Seconds")
+                subprocess.run(["xdotool", "key", "Right"])
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_SKP10) == GPIO.LOW:
+                    time.sleep(0.1)
+            
+            # Button: Rewind 10 Seconds
+            if GPIO.input(BUTTON_REW10) == GPIO.LOW:
+                log_message("Skip Backward 10 Seconds")
+                subprocess.run(["xdotool", "key", "Left"])
+
+                time.sleep(1)
+                while GPIO.input(BUTTON_REW10) == GPIO.LOW:
                     time.sleep(0.1)
 
             time.sleep(0.1)
