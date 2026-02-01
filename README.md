@@ -2,7 +2,7 @@
 VLC Video Looper Script for Raspberry Pi
 
 ## Features
-A Python-Script that autostarts VLC Player (in Fullscreen) and plays Videos (Randomly) from USB Stick.
+A Python-Script that autostarts VLC Player (in Fullscreen) and plays videos (randomly) from usb stick.
 
 - Automatically Mounts USB Stick on Bootup
 - Detects Folders on USB Containing Videos
@@ -17,37 +17,46 @@ A Python-Script that autostarts VLC Player (in Fullscreen) and plays Videos (Ran
 - LED Driver Support
 
 ## Setup
-As the Script is built for a Raspberry Pi 2, this Setup is 
+As the script is built for a Raspberry Pi 2 with Buster, this setup may be different for newer systems. Good luck.
 
-### Hardware
+### 1. Craft Hardware
 1. Get old Raspberry Pi
-2. Connect Screen (preferably with RF Modulator to 80s Kitchen Tube TV)
-3. Solder Wanted Buttons and 7-Segment Display to GPIO
+2. Connect screen (preferably with RF modulator to 80s kitchen tube tv)
+3. Solder wanted buttons and 7-Segment display to GPIO
 
-## Prepare System
-1. Format SD Card (exFAT) and Install Linux (easyest via Raspberry Pi Imager)
-2. Format USB Stick (exFAT) and fill with Videos (with subfolders)
-```
-USB/
-├── Simpsons/
-│   ├── ep01.mkv
-│   └── ep02.mkv
-├── Pokemon/
-│   └── ep01.mkv
-...
-```
+### 2. Enchant Software
+1. Format sd card (exFAT)
+2. Install linux (easyest via Raspberry Pi Imager)
+3. Install `vlc`, `xdotool` and `spidev`
 
-### Automount USB Stick
-1. Find out UUID of Stick: `sudo blkid /dev/sda1`
+### 3. Bag Scripts
+1. Copy `nonstoptv.py` to `/boot`
+2. Copy `nonstoptv.desktop` to `/home/pi/.config/autostart`
+
+### 4. Automount USB Stick
+1. Find out UUID of stick: `sudo blkid /dev/sda1`
 2. Edit `/etc/fstab` with `UUID=[1234-5678]  /media/pi/USB  [format]  defaults,nofail  0  0`
-3. Create Mounting Point
+3. Create mounting point
   ```
   sudo mkdir -p /media/pi/USB
   sudo chown pi:pi /media/pi/USB
   sudo mount -a
   ```
-Troubleshooting: Note that you need to create a new Mounting Point if you change your USB Stick or format it
+Troubleshooting: Note that you need to create a new mounting point if you change your usb stick or format it!
 
-### Autostart Script
-1. Copy `nonstoptv.py` into `/boot`
-2. Copy `nonstoptv.desktop` into `/home/pi/.config/autostart`
+### 5. Gather Videos
+1. Format usb stick (exFAT)
+2. Fill with videos (with subfolders)
+  ```
+  USB/
+  ├── Simpsons/
+  │   ├── ep01.mkv
+  │   └── ep02.mkv
+  ├── Pokemon/
+  │   ├── ep01.mkv
+  │   └── ep02.mkv
+  ...
+  ```
+
+### 6. Enjoy
+Reboot and you should be ready to go.

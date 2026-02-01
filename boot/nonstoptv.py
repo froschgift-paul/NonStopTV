@@ -13,12 +13,12 @@ from pathlib import Path
 # Paths
 USB_PATH = Path("/media/pi/USB")
 STATE_FILE = Path("/boot/nonstoptv.ini")
+LOG_FILE = Path(USB_PATH / "nonstoptv_vlc.log")
 
 # Config
 VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4"]
 RANDOM = True
 VOLUME = 25
-VLC_LOG_FILE = Path("/tmp/nonstoptv_vlc.log")
 
 # GPIO
 GPIO.setmode(GPIO.BCM)
@@ -145,49 +145,27 @@ def set_video_looper_path(folder_name):
     restart_video_looper()
 
 # (Re)Start VLC Player
-def start_vlc_player(folder_name, restart =False):
+def start_vlc_player(dir, restart =False):
     if restart:
-        subprocess.run(["pkill", "-x", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-x", "cvlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "vlc"])
         time.sleep(1)
+    video_path = USB_PATH / dir
+    vlc_command = [
+        "vlc",
+        "--loop",
+        "--fullscreen",
+        "--no-video-title-show",
+        str(video_path),
+    ]
 
-    has_display = False
-    display_value = ""
-    if "DISPLAY" in os.environ:
-        display_value = os.environ["DISPLAY"]
-
-    if display_value.startswith(":"):
-        display_number_text = display_value[1:].split(".", 1)[0]
-        if display_number_text.isdigit():
-            x11_socket = Path(f"/tmp/.X11-unix/X{display_number_text}")
-            if x11_socket.exists():
-                has_display = True
-
-    video_path = USB_PATH / folder_name
-    vlc_command = []
-
-    if has_display:
-        vlc_command.append("vlc")
-    else:
-        vlc_command.append("cvlc")
-
-    vlc_command.extend(["--no-dbus", "--no-keyboard-events"])
-    if not has_display:
-        vlc_command.extend(["--intf", "dummy"])
-
-    vlc_command.extend(["--loop", "--fullscreen"])
     if RANDOM:
-        vlc_command.append("--random")
-    vlc_command.extend(["--no-video-title-show", str(video_path)])
-    try:
-        with VLC_LOG_FILE.open("a", encoding="utf-8", errors="ignore", newline="\n") as log_text_file:
-            log_text_file.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} START VLC: {' '.join(vlc_command)} ---\n")
-    except Exception:
-        pass
+        vlc_command.insert(4, "--random")
 
     try:
-        with VLC_LOG_FILE.open("ab") as log_file:
-            process = subprocess.Popen(vlc_command, stdout=log_file, stderr=log_file)
+        with LOG_FILE.open("ab") as log:
+            header = f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} START VLC: {' '.join(vlc_command)} ---\n"
+            log.write(header.encode("utf-8", errors="ignore"))
+            process = subprocess.Popen(vlc_command, stdout=log, stderr=log)
         print(f"VLC started (pid={process.pid})")
     except Exception as error:
         print(f"Could not start VLC: {error}")
@@ -215,7 +193,7 @@ current_index = 0
 if "Simpsons" in dirs:
     current_index = dirs.index("Simpsons")
 
-# Wait For X11 Session (When Started With DISPLAY)
+# Wait For X11 Session
 display_value = os.environ.get("DISPLAY", "")
 if display_value.startswith(":"):
     display_number_text = display_value[1:].split(".", 1)[0]
@@ -238,7 +216,6 @@ start_vlc_player(dirs[current_index])
 try:
     while True:
         try:
-
             # Button: Next Folder
             if GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
                 current_index = (current_index + 1) % len(dirs)
