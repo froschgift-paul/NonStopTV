@@ -2,19 +2,20 @@
 VLC Video Looper Script for Raspberry Pi
 
 ## Features
-A Python-Script that autostarts VLC Player (in Fullscreen) and plays videos (randomly) from usb stick.
+A python script that autostarts VLC player (in Fullscreen) and plays videos (randomly) from usb stick.
 
-- Automatically Mounts USB Stick on Bootup
-- Detects Folders on USB Containing Videos
-- Creates Memory File to Remember Current Folder and Video
-- GPIO-Buttons for
-  - Switch to next Folder on USB
-  - Next Video
-  - Swap Language
-  - Pause Video
-  - Skip 10 Seconds
-  - Rewind 10 Seconds
-- LED Driver Support
+- Automatically mounts usb stick on bootup
+- Detects folders on usb containing videos
+- Creates memory file to remember current folder
+- GPIO buttons for
+  - Switch to next folder on usb
+  - Next video
+  - Swap language
+  - Pause video
+  - Skip 10 seconds
+  - Rewind 10 seconds
+- LED driver support
+- Options for LED light and volume
 
 ## Setup
 As the script is built for a Raspberry Pi 2 with Buster, this setup may be different for newer systems. Good luck.
