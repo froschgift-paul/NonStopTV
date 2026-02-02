@@ -35,6 +35,8 @@ led_scroll_text = ""
 led_scroll_index = 0
 led_scroll_next_time = 0
 led_current_message = ""
+led_temp_message_until = 0
+LED_TEMP_MESSAGE_SECONDS = 2.0
 
 # GPIO
 GPIO.setmode(GPIO.BCM)
@@ -245,6 +247,7 @@ def kill_other_instances():
     except Exception:
         pass
 
+# VLC RC Communication
 def vlc_rc_send(command, expect_response=False):
     try:
         with socket.create_connection((VLC_RC_HOST, VLC_RC_PORT), timeout=0.25) as handle:
@@ -268,6 +271,7 @@ def vlc_rc_send(command, expect_response=False):
     except Exception:
         return ""
 
+# Get Current Playing File Name from VLC
 def vlc_get_current_file_name():
     response = vlc_rc_send("playlist", expect_response=True)
     if not response:
@@ -293,6 +297,23 @@ def vlc_get_current_file_name():
 
     return ""
 
+# Check if VLC is Paused
+def vlc_is_paused():
+    response = vlc_rc_send("status", expect_response=True)
+    if not response:
+        return False
+
+    lower = response.lower()
+    if "state paused" in lower:
+        return True
+    if "state playing" in lower:
+        return False
+    if "paused" in lower and "state" in lower:
+        return True
+
+    return False
+
+# LED Display Scrolling Tick
 def display_tick(seg):
     global led_scroll_index
     global led_scroll_next_time
@@ -341,6 +362,21 @@ def show_message(seg, msg, scroll_delay=LED_SCROLL_DELAY):
     led_scroll_index = 0
     led_scroll_next_time = 0
     seg.text = led_scroll_text[:width]
+
+# Show Temporary Message on LED Display
+def show_temporary_message(seg, msg, seconds=LED_TEMP_MESSAGE_SECONDS):
+    global led_temp_message_until
+
+    show_message(seg, msg)
+    led_temp_message_until = time.time() + float(seconds)
+
+def is_temporary_message_active():
+    return time.time() < led_temp_message_until
+
+def clear_temporary_message():
+    global led_temp_message_until
+
+    led_temp_message_until = 0
 
 
 ##########################
@@ -444,20 +480,39 @@ show_message(seg, f"{dirs[current_index]}".upper())
 try:
     last_video_name = ""
     last_video_query_time = 0
+    is_paused_display_active = False
+    last_button_skp10_state = GPIO.HIGH
+    last_button_rew10_state = GPIO.HIGH
+    last_button_skp10_time = 0
+    last_button_rew10_time = 0
     while True:
         try:
             display_tick(seg)
 
+            if not is_temporary_message_active() and led_temp_message_until:
+                clear_temporary_message()
+                if is_paused_display_active:
+                    show_message(seg, "PAUSE")
+                else:
+                    if last_video_name:
+                        show_message(seg, last_video_name)
+                    else:
+                        current_file_name = vlc_get_current_file_name()
+                        if current_file_name:
+                            last_video_name = Path(current_file_name).stem
+                            show_message(seg, last_video_name)
+
             # Check Current Video Every Second
             now = time.time()
-            if now - last_video_query_time >= 1.0:
+            if not is_paused_display_active and now - last_video_query_time >= 1.0:
                 current_file_name = vlc_get_current_file_name()
                 if current_file_name:
                     current_video_name = Path(current_file_name).stem
                     if current_video_name and current_video_name != last_video_name:
                         log_message(f"Playing: {current_video_name}")
-                        show_message(seg, current_video_name)
                         last_video_name = current_video_name
+                        if not is_temporary_message_active():
+                            show_message(seg, current_video_name)
                 last_video_query_time = now
 
             # Button: Next Folder
@@ -487,7 +542,34 @@ try:
             # Button: Pause/Play
             if GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
                 log_message("Pause/Play")
-                subprocess.run(["xdotool", "key", "space"])
+                if is_paused_display_active:
+                    subprocess.run(["xdotool", "key", "space"])
+                    is_paused_display_active = False
+
+                    if last_video_name:
+                        show_message(seg, last_video_name)
+                    else:
+                        current_file_name = vlc_get_current_file_name()
+                        if current_file_name:
+                            last_video_name = Path(current_file_name).stem
+                            show_message(seg, last_video_name)
+
+                    last_video_query_time = time.time()
+                else:
+                    subprocess.run(["xdotool", "key", "space"])
+
+                    pause_wait_seconds = 0
+                    paused_now = False
+                    while pause_wait_seconds < 1.0:
+                        paused_now = vlc_is_paused()
+                        if paused_now:
+                            break
+                        time.sleep(0.1)
+                        pause_wait_seconds += 0.1
+
+                    if paused_now:
+                        is_paused_display_active = True
+                        show_message(seg, "PAUSE")
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
@@ -503,23 +585,26 @@ try:
                     time.sleep(0.1)
             
             # Button: Skip 10 Seconds
-            if GPIO.input(BUTTON_SKP10) == GPIO.LOW:
-                log_message("Skip Forward 10 Seconds")
-                subprocess.run(["xdotool", "key", "Right"])
-                show_message(seg, f"PLUS  10")
-
-                time.sleep(1)
-                while GPIO.input(BUTTON_SKP10) == GPIO.LOW:
-                    time.sleep(0.1)
+            button_skp10_state = GPIO.input(BUTTON_SKP10)
+            if button_skp10_state == GPIO.LOW and last_button_skp10_state == GPIO.HIGH:
+                now = time.time()
+                if now - last_button_skp10_time >= 0.3:
+                    last_button_skp10_time = now
+                    log_message("Skip Forward 10 Seconds")
+                    subprocess.run(["xdotool", "key", "Right"])
+                    show_temporary_message(seg, "PLUS  10")
+            last_button_skp10_state = button_skp10_state
             
             # Button: Rewind 10 Seconds
-            if GPIO.input(BUTTON_REW10) == GPIO.LOW:
-                log_message("Skip Backward 10 Seconds")
-                subprocess.run(["xdotool", "key", "Left"])
-                show_message(seg, f"MINUS 10")
-                time.sleep(1)
-                while GPIO.input(BUTTON_REW10) == GPIO.LOW:
-                    time.sleep(0.1)
+            button_rew10_state = GPIO.input(BUTTON_REW10)
+            if button_rew10_state == GPIO.LOW and last_button_rew10_state == GPIO.HIGH:
+                now = time.time()
+                if now - last_button_rew10_time >= 0.3:
+                    last_button_rew10_time = now
+                    log_message("Skip Backward 10 Seconds")
+                    subprocess.run(["xdotool", "key", "Left"])
+                    show_temporary_message(seg, "MINUS 10")
+            last_button_rew10_state = button_rew10_state
 
             time.sleep(0.1)
         except Exception as error:
