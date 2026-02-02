@@ -27,7 +27,7 @@ As the script is built for a Raspberry Pi 2 with Buster, this setup may be diffe
 ### 2. Enchant Software
 1. Format sd card (exFAT)
 2. Install linux (easyest via Raspberry Pi Imager)
-3. Install `vlc`, `xdotool` and `spidev`
+3. Install `vlc`, `xdotool`,  `spidev` and `luma.led-matrix`
 
 ### 3. Bag Scripts
 1. Copy `nonstoptv.py` to `/boot`
@@ -60,4 +60,4 @@ Troubleshooting: Note that you need to create a new mounting point if you change
 
 ### 6. Enjoy
 Reboot and you should be ready to go.
-(After first Launch you will find an .ini and a .log file in `/home/pi/` where you can view and tweak details).
+(After first Launch you will find an .ini and a .log file in your usb drive where you can view and tweak details).

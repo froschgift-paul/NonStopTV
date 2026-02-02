@@ -4,6 +4,9 @@ import time
 import os
 import subprocess
 from pathlib import Path
+from luma.led_matrix.device import max7219
+from luma.core.interface.serial import spi, noop
+from luma.core.virtual import sevensegment, viewport
 
 # https://wiki.ubuntuusers.de/xdotool/
 # https://wiki.ubuntuusers.de/VLC/
@@ -15,10 +18,9 @@ from pathlib import Path
 ####################
 
 # Paths
-USB_PATH = Path("/media/pi/USB")
-WORKING_PATH = Path("/home/pi/")
-STATE_FILE = WORKING_PATH / "nonstoptv-config.ini"
-LOG_FILE = WORKING_PATH / "nonstoptv-report.log"
+USB_PATH = Path("/media/pi/USB/")
+STATE_FILE = USB_PATH / "nonstoptv-config.ini"
+LOG_FILE = USB_PATH / "nonstoptv-report.log"
 
 # Config
 VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4"]
@@ -238,6 +240,22 @@ def kill_other_instances():
     except Exception:
         pass
 
+# Show Message on LED Display
+def show_message(seg, msg, delay=0.1):
+    seg.text = msg
+    time.sleep(delay)
+    # width = device.width
+    # padding = " " * width
+    # msg = padding + msg + padding
+    # n = len(msg)
+ 
+    # virtual = viewport(device, width=n, height=8)
+    # sevensegment(virtual).text = msg
+    # for i in reversed(list(range(n - width))):
+    #     virtual.set_position((i, 0))
+    #     time.sleep(delay)
+
+
 ##########################
 ##### INITIALISATION #####
 ##########################
@@ -281,6 +299,20 @@ if volume_value < 0 or volume_value > 100:
 else:
     VOLUME = volume_value
 
+ledbrightness_text = ini_get("ledbrightness", None)
+ledbrightness_value = -1
+if ledbrightness_text is None:
+    ledbrightness_value = 100
+    ini_set("ledbrightness", "100")
+elif ledbrightness_text.isdigit():
+    ledbrightness_value = int(ledbrightness_text)
+
+if ledbrightness_value < 0 or ledbrightness_value > 100:
+    ledbrightness = 100
+    ini_set("ledbrightness", "100")
+else:
+    ledbrightness = int(round(ledbrightness_value * 2.55))
+
 # Wait for USB Stick to be Mounted
 while not is_usb_ready():
     log_message("Waiting For USB")
@@ -310,6 +342,13 @@ current_index = load_state(dirs)
 save_state(current_index, dirs)
 start_vlc_player(dirs[current_index])
 
+# LED Setup
+serial = spi(port=0, device=0, gpio=noop())
+device = max7219(serial, cascaded=1)
+seg = sevensegment(device)
+seg.device.contrast(ledbrightness)
+show_message(seg, f"{dirs[current_index]}".upper())
+
 
 ##########################
 ##### BUTTON CONTROL #####
@@ -324,6 +363,7 @@ try:
                 log_message(f"Switch Folder: {dirs[current_index]}")
                 save_state(current_index, dirs)
                 start_vlc_player(dirs[current_index], restart=True)
+                show_message(seg, f"{dirs[current_index]}".upper())
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
@@ -360,6 +400,7 @@ try:
             if GPIO.input(BUTTON_SKP10) == GPIO.LOW:
                 log_message("Skip Forward 10 Seconds")
                 subprocess.run(["xdotool", "key", "Right"])
+                show_message(seg, f"PLUS 10")
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_SKP10) == GPIO.LOW:
@@ -369,7 +410,7 @@ try:
             if GPIO.input(BUTTON_REW10) == GPIO.LOW:
                 log_message("Skip Backward 10 Seconds")
                 subprocess.run(["xdotool", "key", "Left"])
-
+                show_message(seg, f"MINUS 10")
                 time.sleep(1)
                 while GPIO.input(BUTTON_REW10) == GPIO.LOW:
                     time.sleep(0.1)
