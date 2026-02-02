@@ -3,6 +3,8 @@ import RPi.GPIO as GPIO
 import time
 import os
 import subprocess
+import socket
+import urllib.parse
 from pathlib import Path
 from luma.led_matrix.device import max7219
 from luma.core.interface.serial import spi, noop
@@ -24,6 +26,15 @@ LOG_FILE = USB_PATH / "nonstoptv-report.log"
 
 # Config
 VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4"]
+VLC_RC_HOST = "127.0.0.1"
+VLC_RC_PORT = 4212
+
+# LED Display
+LED_SCROLL_DELAY = 0.15
+led_scroll_text = ""
+led_scroll_index = 0
+led_scroll_next_time = 0
+led_current_message = ""
 
 # GPIO
 GPIO.setmode(GPIO.BCM)
@@ -126,7 +137,7 @@ def ini_get(key, default_value = ""):
 # Write INI State
 def ini_set(key, value):
     if STATE_FILE.exists() and STATE_FILE.is_dir():
-        log_message(f"State File Is A Directory: {STATE_FILE}")
+        log_message(f"State File is a Directory: {STATE_FILE}")
         return False
 
     value_text = str(value).replace("\r", "").replace("\n", " ")
@@ -206,19 +217,13 @@ def start_vlc_player(dir, restart =False):
         subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     video_path = USB_PATH / dir
-    vlc_command = [
-        "vlc",
-        "--loop",
-        "--fullscreen",
-        "--no-video-title-show",
-        str(video_path),
-    ]
-
+    vlc_command = ["vlc", "--loop", "--fullscreen", "--no-video-title-show"]
     if RANDOM:
-        vlc_command.insert(4, "--random")
+        vlc_command.append("--random")
+    vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(video_path)])
 
     try:
-        log_message(f"Starting With Folder: {dir}")
+        log_message(f"Playing Videos in Folder: {dir}")
         with LOG_FILE.open("ab") as log:
             process = subprocess.Popen(vlc_command, stdout=log, stderr=log)
         log_message(f"VLC Started (pid={process.pid})")
@@ -240,20 +245,102 @@ def kill_other_instances():
     except Exception:
         pass
 
+def vlc_rc_send(command, expect_response=False):
+    try:
+        with socket.create_connection((VLC_RC_HOST, VLC_RC_PORT), timeout=0.25) as handle:
+            handle.sendall(f"{command}\n".encode("utf-8", errors="ignore"))
+
+            if not expect_response:
+                return ""
+
+            handle.settimeout(0.15)
+            chunks = []
+            while True:
+                try:
+                    chunk = handle.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                except (socket.timeout, TimeoutError):
+                    break
+
+            return b"".join(chunks).decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+def vlc_get_current_file_name():
+    response = vlc_rc_send("playlist", expect_response=True)
+    if not response:
+        return ""
+
+    for line in response.splitlines():
+        cleaned = line.strip()
+        if "*" not in cleaned:
+            continue
+
+        if " - " not in cleaned:
+            continue
+
+        item_text = cleaned.split(" - ", 1)[1].strip()
+        if item_text.startswith("file://"):
+            item_text = item_text[7:]
+
+        item_text = urllib.parse.unquote(item_text)
+        item_text = item_text.replace("\\", "/")
+        file_name = Path(item_text).name
+        if file_name:
+            return file_name
+
+    return ""
+
+def display_tick(seg):
+    global led_scroll_index
+    global led_scroll_next_time
+
+    if not led_scroll_text:
+        return
+
+    now = time.time()
+    if now < led_scroll_next_time:
+        return
+
+    width = seg.device.width
+    max_start_index = len(led_scroll_text) - width
+    if max_start_index < 0:
+        return
+
+    if led_scroll_index > max_start_index:
+        led_scroll_index = 0
+
+    seg.text = led_scroll_text[led_scroll_index:led_scroll_index + width]
+    led_scroll_index += 1
+    led_scroll_next_time = now + LED_SCROLL_DELAY
+
 # Show Message on LED Display
-def show_message(seg, msg, delay=0.1):
-    seg.text = msg
-    time.sleep(delay)
-    # width = device.width
-    # padding = " " * width
-    # msg = padding + msg + padding
-    # n = len(msg)
- 
-    # virtual = viewport(device, width=n, height=8)
-    # sevensegment(virtual).text = msg
-    # for i in reversed(list(range(n - width))):
-    #     virtual.set_position((i, 0))
-    #     time.sleep(delay)
+def show_message(seg, msg, scroll_delay=LED_SCROLL_DELAY):
+    global led_scroll_text
+    global led_scroll_index
+    global led_scroll_next_time
+    global LED_SCROLL_DELAY
+    global led_current_message
+
+    width = seg.device.width
+    message_text = str(msg).upper()
+    led_current_message = message_text
+    LED_SCROLL_DELAY = float(scroll_delay)
+
+    if len(message_text) <= width:
+        led_scroll_text = ""
+        led_scroll_index = 0
+        led_scroll_next_time = 0
+        seg.text = message_text.ljust(width)
+        return
+
+    padding = " " * width
+    led_scroll_text = f"{padding}{message_text}{padding}"
+    led_scroll_index = 0
+    led_scroll_next_time = 0
+    seg.text = led_scroll_text[:width]
 
 
 ##########################
@@ -315,13 +402,13 @@ else:
 
 # Wait for USB Stick to be Mounted
 while not is_usb_ready():
-    log_message("Waiting For USB")
+    log_message("Waiting for USB")
     time.sleep(1)
 
 # Get Video Directories
 dirs = list_video_folders()
 while not dirs:
-    log_message("Searching For Folders")
+    log_message("Searching for Folders")
     time.sleep(2)
     dirs = list_video_folders()
 
@@ -355,8 +442,24 @@ show_message(seg, f"{dirs[current_index]}".upper())
 ##########################
 
 try:
+    last_video_name = ""
+    last_video_query_time = 0
     while True:
         try:
+            display_tick(seg)
+
+            # Check Current Video Every Second
+            now = time.time()
+            if now - last_video_query_time >= 1.0:
+                current_file_name = vlc_get_current_file_name()
+                if current_file_name:
+                    current_video_name = Path(current_file_name).stem
+                    if current_video_name and current_video_name != last_video_name:
+                        log_message(f"Playing: {current_video_name}")
+                        show_message(seg, current_video_name)
+                        last_video_name = current_video_name
+                last_video_query_time = now
+
             # Button: Next Folder
             if GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
                 current_index = (current_index + 1) % len(dirs)
@@ -364,6 +467,9 @@ try:
                 save_state(current_index, dirs)
                 start_vlc_player(dirs[current_index], restart=True)
                 show_message(seg, f"{dirs[current_index]}".upper())
+
+                last_video_name = ""
+                last_video_query_time = 0
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
@@ -400,7 +506,7 @@ try:
             if GPIO.input(BUTTON_SKP10) == GPIO.LOW:
                 log_message("Skip Forward 10 Seconds")
                 subprocess.run(["xdotool", "key", "Right"])
-                show_message(seg, f"PLUS 10")
+                show_message(seg, f"PLUS  10")
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_SKP10) == GPIO.LOW:
