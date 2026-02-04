@@ -25,7 +25,7 @@ STATE_FILE = USB_PATH / "nonstoptv-config.ini"
 LOG_FILE = USB_PATH / "nonstoptv-report.log"
 
 # Config
-VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4"]
+VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4", ".m4a"]
 VLC_RC_HOST = "127.0.0.1"
 VLC_RC_PORT = 4212
 
@@ -219,6 +219,7 @@ def start_vlc_player(dir, restart =False):
         subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     video_path = USB_PATH / dir
+    # vlc_command = ["vlc", "--loop", "--fullscreen", "--audio-visual=visual", "--no-video-title-show"]
     vlc_command = ["vlc", "--loop", "--fullscreen", "--no-video-title-show"]
     if RANDOM:
         vlc_command.append("--random")
@@ -273,27 +274,22 @@ def vlc_rc_send(command, expect_response=False):
 
 # Get Current Playing File Name from VLC
 def vlc_get_current_file_name():
-    response = vlc_rc_send("playlist", expect_response=True)
+    response = vlc_rc_send("info", expect_response=True)
     if not response:
         return ""
 
     for line in response.splitlines():
         cleaned = line.strip()
-        if "*" not in cleaned:
-            continue
 
-        if " - " not in cleaned:
-            continue
+        # Remove VLC Table Prefix
+        if cleaned.startswith("| "):
+            cleaned = cleaned[2:]
 
-        item_text = cleaned.split(" - ", 1)[1].strip()
-        if item_text.startswith("file://"):
-            item_text = item_text[7:]
-
-        item_text = urllib.parse.unquote(item_text)
-        item_text = item_text.replace("\\", "/")
-        file_name = Path(item_text).name
-        if file_name:
-            return file_name
+        # Look for "filename:" Line in Info Output
+        if cleaned.lower().startswith("filename:"):
+            file_name = cleaned[9:].strip()
+            if file_name:
+                return file_name
 
     return ""
 
@@ -535,7 +531,7 @@ try:
                 log_message("Next Video")
                 subprocess.run(["xdotool", "key", "n"])
 
-                time.sleep(1)
+                time.sleep(0.5)
                 while GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
                     time.sleep(0.1)
             
@@ -571,7 +567,7 @@ try:
                         is_paused_display_active = True
                         show_message(seg, "PAUSE")
 
-                time.sleep(1)
+                time.sleep(0.1)
                 while GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
                     time.sleep(0.1)
             
@@ -580,7 +576,7 @@ try:
                 log_message("Change Audio Track")
                 subprocess.run(["xdotool", "key", "b"])
 
-                time.sleep(1)
+                time.sleep(0.1)
                 while GPIO.input(BUTTON_LANGUAGE) == GPIO.LOW:
                     time.sleep(0.1)
             
