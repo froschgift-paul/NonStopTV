@@ -25,7 +25,7 @@ STATE_FILE = USB_PATH / "nonstoptv-config.ini"
 LOG_FILE = USB_PATH / "nonstoptv-report.log"
 
 # Config
-VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4"]
+VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4", ".m4a"]
 VLC_RC_HOST = "127.0.0.1"
 VLC_RC_PORT = 4212
 
@@ -219,7 +219,7 @@ def start_vlc_player(dir, restart =False):
         subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     video_path = USB_PATH / dir
-    vlc_command = ["vlc", "--loop", "--fullscreen", "--no-video-title-show"]
+    vlc_command = ["vlc", "--loop", "--fullscreen", "--audio-visual=visual", "--no-video-title-show"]
     if RANDOM:
         vlc_command.append("--random")
     vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(video_path)])
@@ -271,12 +271,89 @@ def vlc_rc_send(command, expect_response=False):
     except Exception:
         return ""
 
+def vlc_extract_file_name(value):
+    if not value:
+        return ""
+
+    cleaned = str(value).strip().strip('"').strip("'")
+    if not cleaned:
+        return ""
+
+    if cleaned.startswith("file://"):
+        cleaned = cleaned[7:]
+
+    cleaned = urllib.parse.unquote(cleaned)
+    cleaned = cleaned.replace("\\", "/")
+    return Path(cleaned).name
+
+def vlc_get_current_file_name_from_status():
+    response = vlc_rc_send("status", expect_response=True)
+    if not response:
+        return ""
+
+    for line in response.splitlines():
+        cleaned = line.strip()
+        lower = cleaned.lower()
+
+        if "new input:" in lower:
+            value = cleaned.split(":", 1)[1].strip()
+            file_name = vlc_extract_file_name(value)
+            if file_name:
+                return file_name
+
+        if lower.startswith("input:"):
+            value = cleaned.split(":", 1)[1].strip()
+            file_name = vlc_extract_file_name(value)
+            if file_name:
+                return file_name
+
+        if lower.startswith("filename:"):
+            value = cleaned.split(":", 1)[1].strip()
+            file_name = vlc_extract_file_name(value)
+            if file_name:
+                return file_name
+
+    return ""
+
+def vlc_get_current_file_name_from_info():
+    response = vlc_rc_send("info", expect_response=True)
+    if not response:
+        return ""
+
+    for line in response.splitlines():
+        cleaned = line.strip()
+        lower = cleaned.lower()
+
+        if lower.startswith("filename:"):
+            value = cleaned.split(":", 1)[1].strip()
+            file_name = vlc_extract_file_name(value)
+            if file_name:
+                return file_name
+
+        if lower.startswith("location:"):
+            value = cleaned.split(":", 1)[1].strip()
+            file_name = vlc_extract_file_name(value)
+            if file_name:
+                return file_name
+
+    return ""
+
 # Get Current Playing File Name from VLC
 def vlc_get_current_file_name():
+    file_name = vlc_get_current_file_name_from_status()
+    if file_name:
+        return file_name
+
+    file_name = vlc_get_current_file_name_from_info()
+    if file_name:
+        return file_name
+
     response = vlc_rc_send("playlist", expect_response=True)
     if not response:
         return ""
 
+    best_file_name = ""
+    fallback_text = ""
     for line in response.splitlines():
         cleaned = line.strip()
         if "*" not in cleaned:
@@ -286,14 +363,33 @@ def vlc_get_current_file_name():
             continue
 
         item_text = cleaned.split(" - ", 1)[1].strip()
-        if item_text.startswith("file://"):
-            item_text = item_text[7:]
+        if not item_text:
+            continue
 
-        item_text = urllib.parse.unquote(item_text)
-        item_text = item_text.replace("\\", "/")
-        file_name = Path(item_text).name
-        if file_name:
-            return file_name
+        # Avoid playlist tree/group nodes like "Folder (played 1 times)"
+        if "(played" in item_text.lower():
+            fallback_text = item_text
+            continue
+
+        if item_text.startswith("file://"):
+            decoded = urllib.parse.unquote(item_text[7:])
+            decoded = decoded.replace("\\", "/")
+            file_name = Path(decoded).name
+            if file_name:
+                best_file_name = file_name
+            continue
+
+        lower_item = item_text.lower()
+        for extension in VIDEO_EXTENSIONS:
+            if lower_item.endswith(extension):
+                best_file_name = Path(item_text).name
+                break
+
+    if best_file_name:
+        return best_file_name
+
+    if fallback_text:
+        return ""
 
     return ""
 
@@ -535,7 +631,7 @@ try:
                 log_message("Next Video")
                 subprocess.run(["xdotool", "key", "n"])
 
-                time.sleep(1)
+                time.sleep(0.5)
                 while GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
                     time.sleep(0.1)
             
@@ -571,7 +667,7 @@ try:
                         is_paused_display_active = True
                         show_message(seg, "PAUSE")
 
-                time.sleep(1)
+                time.sleep(0.1)
                 while GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
                     time.sleep(0.1)
             
@@ -580,7 +676,7 @@ try:
                 log_message("Change Audio Track")
                 subprocess.run(["xdotool", "key", "b"])
 
-                time.sleep(1)
+                time.sleep(0.1)
                 while GPIO.input(BUTTON_LANGUAGE) == GPIO.LOW:
                     time.sleep(0.1)
             
