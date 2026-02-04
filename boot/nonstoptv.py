@@ -4,7 +4,7 @@ import time
 import os
 import subprocess
 import socket
-import urllib.parse
+import random
 from pathlib import Path
 from luma.led_matrix.device import max7219
 from luma.core.interface.serial import spi, noop
@@ -25,7 +25,9 @@ STATE_FILE = USB_PATH / "nonstoptv-config.ini"
 LOG_FILE = USB_PATH / "nonstoptv-report.log"
 
 # Config
-VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp3", ".mp4", ".m4a"]
+AUDIO_EXTENSIONS = [".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac"]
+VIDEO_EXTENSIONS = [".avi", ".mov", ".mkv", ".mp4", ".webm", ".wmv"]
+MEDIA_EXTENSIONS = AUDIO_EXTENSIONS + VIDEO_EXTENSIONS
 VLC_RC_HOST = "127.0.0.1"
 VLC_RC_PORT = 4212
 
@@ -37,6 +39,11 @@ led_scroll_next_time = 0
 led_current_message = ""
 led_temp_message_until = 0
 LED_TEMP_MESSAGE_SECONDS = 2.0
+
+# Playlist
+playlist = []
+playlist_index = 0
+vlc_process = None
 
 # GPIO
 GPIO.setmode(GPIO.BCM)
@@ -95,7 +102,7 @@ def list_video_folders():
         found = False
         try:
             for subpath in folder.rglob("*"):
-                if subpath.is_file() and subpath.suffix.lower() in VIDEO_EXTENSIONS:
+                if subpath.is_file() and subpath.suffix.lower() in MEDIA_EXTENSIONS:
                     valid_dirs.append(folder.name)
                     found = True
                     break
@@ -213,25 +220,82 @@ def save_state(index, dirs):
 
     ini_set("folder", dirs[index])
 
-# (Re)Start VLC Player
-def start_vlc_player(dir, restart =False):
-    if restart:
-        subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1)
-    video_path = USB_PATH / dir
-    # vlc_command = ["vlc", "--loop", "--fullscreen", "--audio-visual=visual", "--no-video-title-show"]
-    vlc_command = ["vlc", "--loop", "--fullscreen", "--no-video-title-show"]
-    if RANDOM:
-        vlc_command.append("--random")
-    vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(video_path)])
+# Check if File is Audio
+def is_audio_file(filename):
+    return Path(filename).suffix.lower() in AUDIO_EXTENSIONS
+
+# Get All Media Files in Folder
+def list_media_files(folder_name):
+    folder_path = USB_PATH / folder_name
+    files = []
+    try:
+        for subpath in folder_path.rglob("*"):
+            if subpath.is_file() and subpath.suffix.lower() in MEDIA_EXTENSIONS:
+                files.append(subpath)
+    except OSError:
+        pass
+    return sorted(files)
+
+# Build and Shuffle Playlist
+def build_playlist(folder_name):
+    global playlist
+    global playlist_index
+
+    playlist = list_media_files(folder_name)
+    if RANDOM and playlist:
+        random.shuffle(playlist)
+    playlist_index = 0
+    log_message(f"Playlist Built: {len(playlist)} files")
+
+# Start VLC for Single File
+def start_vlc_file(file_path):
+    global vlc_process
+
+    subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+
+    vlc_command = ["vlc", "--play-and-exit", "--fullscreen", "--no-video-title-show"]
+    if is_audio_file(file_path):
+        vlc_command.append("--audio-visual=visual")
+    vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(file_path)])
 
     try:
-        log_message(f"Playing Videos in Folder: {dir}")
-        with LOG_FILE.open("ab") as log:
-            process = subprocess.Popen(vlc_command, stdout=log, stderr=log)
-        log_message(f"VLC Started (pid={process.pid})")
+        log_message(f"Playing: {file_path.name}")
+        vlc_process = subprocess.Popen(vlc_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as error:
         log_message(f"VLC Start Failed: {error}")
+        vlc_process = None
+
+# Play Next File in Playlist
+def play_next_file():
+    global playlist_index
+
+    if not playlist:
+        return False
+
+    playlist_index = (playlist_index + 1) % len(playlist)
+    start_vlc_file(playlist[playlist_index])
+    return True
+
+# Play Current File in Playlist
+def play_current_file():
+    if not playlist:
+        return False
+
+    start_vlc_file(playlist[playlist_index])
+    return True
+
+# Get Current File Name
+def get_current_file_name():
+    if not playlist or playlist_index >= len(playlist):
+        return ""
+    return playlist[playlist_index].stem
+
+# Check if VLC is Still Running
+def is_vlc_running():
+    if vlc_process is None:
+        return False
+    return vlc_process.poll() is None
 
 # Kill Running Instances of This Script
 def kill_other_instances():
@@ -271,43 +335,6 @@ def vlc_rc_send(command, expect_response=False):
             return b"".join(chunks).decode("utf-8", errors="ignore")
     except Exception:
         return ""
-
-# Get Current Playing File Name from VLC
-def vlc_get_current_file_name():
-    response = vlc_rc_send("info", expect_response=True)
-    if not response:
-        return ""
-
-    for line in response.splitlines():
-        cleaned = line.strip()
-
-        # Remove VLC Table Prefix
-        if cleaned.startswith("| "):
-            cleaned = cleaned[2:]
-
-        # Look for "filename:" Line in Info Output
-        if cleaned.lower().startswith("filename:"):
-            file_name = cleaned[9:].strip()
-            if file_name:
-                return file_name
-
-    return ""
-
-# Check if VLC is Paused
-def vlc_is_paused():
-    response = vlc_rc_send("status", expect_response=True)
-    if not response:
-        return False
-
-    lower = response.lower()
-    if "state paused" in lower:
-        return True
-    if "state playing" in lower:
-        return False
-    if "paused" in lower and "state" in lower:
-        return True
-
-    return False
 
 # LED Display Scrolling Tick
 def display_tick(seg):
@@ -459,7 +486,8 @@ if display_value.startswith(":"):
 subprocess.run(["amixer", "set", "PCM", f"{VOLUME}%"])
 current_index = load_state(dirs)
 save_state(current_index, dirs)
-start_vlc_player(dirs[current_index])
+build_playlist(dirs[current_index])
+play_current_file()
 
 # LED Setup
 serial = spi(port=0, device=0, gpio=noop())
@@ -474,8 +502,7 @@ show_message(seg, f"{dirs[current_index]}".upper())
 ##########################
 
 try:
-    last_video_name = ""
-    last_video_query_time = 0
+    last_displayed_name = ""
     is_paused_display_active = False
     last_button_skp10_state = GPIO.HIGH
     last_button_rew10_state = GPIO.HIGH
@@ -490,37 +517,37 @@ try:
                 if is_paused_display_active:
                     show_message(seg, "PAUSE")
                 else:
-                    if last_video_name:
-                        show_message(seg, last_video_name)
-                    else:
-                        current_file_name = vlc_get_current_file_name()
-                        if current_file_name:
-                            last_video_name = Path(current_file_name).stem
-                            show_message(seg, last_video_name)
+                    current_name = get_current_file_name()
+                    if current_name:
+                        show_message(seg, current_name)
 
-            # Check Current Video Every Second
-            now = time.time()
-            if not is_paused_display_active and now - last_video_query_time >= 1.0:
-                current_file_name = vlc_get_current_file_name()
-                if current_file_name:
-                    current_video_name = Path(current_file_name).stem
-                    if current_video_name and current_video_name != last_video_name:
-                        log_message(f"Playing: {current_video_name}")
-                        last_video_name = current_video_name
-                        if not is_temporary_message_active():
-                            show_message(seg, current_video_name)
-                last_video_query_time = now
+            # Check if VLC Finished Playing
+            if not is_paused_display_active and not is_vlc_running():
+                play_next_file()
+                current_name = get_current_file_name()
+                if current_name and current_name != last_displayed_name:
+                    last_displayed_name = current_name
+                    if not is_temporary_message_active():
+                        show_message(seg, current_name)
+
+            # Update Display with Current File Name
+            current_name = get_current_file_name()
+            if current_name and current_name != last_displayed_name and not is_paused_display_active:
+                last_displayed_name = current_name
+                if not is_temporary_message_active():
+                    show_message(seg, current_name)
 
             # Button: Next Folder
             if GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
                 current_index = (current_index + 1) % len(dirs)
                 log_message(f"Switch Folder: {dirs[current_index]}")
                 save_state(current_index, dirs)
-                start_vlc_player(dirs[current_index], restart=True)
+                build_playlist(dirs[current_index])
+                play_current_file()
                 show_message(seg, f"{dirs[current_index]}".upper())
 
-                last_video_name = ""
-                last_video_query_time = 0
+                last_displayed_name = ""
+                is_paused_display_active = False
 
                 time.sleep(1)
                 while GPIO.input(BUTTON_NEXTFOLDER) == GPIO.LOW:
@@ -529,7 +556,8 @@ try:
             # Button: Next Video
             if GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
                 log_message("Next Video")
-                subprocess.run(["xdotool", "key", "n"])
+                subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                is_paused_display_active = False
 
                 time.sleep(0.5)
                 while GPIO.input(BUTTON_NEXTVIDEO) == GPIO.LOW:
@@ -538,36 +566,18 @@ try:
             # Button: Pause/Play
             if GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
                 log_message("Pause/Play")
+                subprocess.run(["xdotool", "key", "space"])
+
                 if is_paused_display_active:
-                    subprocess.run(["xdotool", "key", "space"])
                     is_paused_display_active = False
-
-                    if last_video_name:
-                        show_message(seg, last_video_name)
-                    else:
-                        current_file_name = vlc_get_current_file_name()
-                        if current_file_name:
-                            last_video_name = Path(current_file_name).stem
-                            show_message(seg, last_video_name)
-
-                    last_video_query_time = time.time()
+                    current_name = get_current_file_name()
+                    if current_name:
+                        show_message(seg, current_name)
                 else:
-                    subprocess.run(["xdotool", "key", "space"])
+                    is_paused_display_active = True
+                    show_message(seg, "PAUSE")
 
-                    pause_wait_seconds = 0
-                    paused_now = False
-                    while pause_wait_seconds < 1.0:
-                        paused_now = vlc_is_paused()
-                        if paused_now:
-                            break
-                        time.sleep(0.1)
-                        pause_wait_seconds += 0.1
-
-                    if paused_now:
-                        is_paused_display_active = True
-                        show_message(seg, "PAUSE")
-
-                time.sleep(0.1)
+                time.sleep(0.3)
                 while GPIO.input(BUTTON_PAUSE) == GPIO.LOW:
                     time.sleep(0.1)
             
