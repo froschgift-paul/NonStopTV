@@ -61,15 +61,31 @@ GPIO.setup(BUTTON_SKP10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_REW10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 
-#####################
-##### FUNCTIONS #####
-#####################
+###############################
+##### ESSENTIAL FUNCTIONS #####
+###############################
 
+# Log Message to Log File
 def log_message(message):
     try:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with LOG_FILE.open("ab") as log:
             log.write(f"--- {timestamp} | {message}\n".encode("utf-8", errors="ignore"))
+    except Exception:
+        pass
+
+# Kill Running Instances of This Script
+def kill_other_instances():
+    try:
+        subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(["pgrep", "-f", "/boot/nonstoptv.py"], capture_output=True, text=True)
+        for pid_text in result.stdout.split():
+            if not pid_text.isdigit():
+                continue
+            pid = int(pid_text)
+            if pid == os.getpid():
+                continue
+            os.kill(pid, 15)
     except Exception:
         pass
 
@@ -86,33 +102,78 @@ def is_usb_ready():
 
     return False
 
-# Get Valid Video Directories
-def list_video_folders():
-    valid_dirs = []
+# Start VLC for Single File
+def start_vlc_file(file_path):
+    global vlc_process
+
+    subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)
+
+    vlc_command = ["vlc", "--play-and-exit", "--fullscreen", "--no-video-title-show"]
+    if is_audio_file(file_path):
+        vlc_command.append("--audio-visual=visual")
+    vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(file_path)])
 
     try:
-        folders = list(USB_PATH.iterdir())
-    except OSError:
-        return valid_dirs
+        log_message(f"Playing: {file_path.name}")
+        vlc_process = subprocess.Popen(vlc_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as error:
+        log_message(f"VLC Start Failed: {error}")
+        vlc_process = None
 
-    for folder in folders:
-        if not folder.is_dir():
-            continue
+# Check if VLC is Still Running
+def is_vlc_running():
+    if vlc_process is None:
+        return False
+    return vlc_process.poll() is None
 
-        found = False
-        try:
-            for subpath in folder.rglob("*"):
-                if subpath.is_file() and subpath.suffix.lower() in MEDIA_EXTENSIONS:
-                    valid_dirs.append(folder.name)
-                    found = True
+# VLC RC Communication
+def vlc_rc_send(command, expect_response=False):
+    try:
+        with socket.create_connection((VLC_RC_HOST, VLC_RC_PORT), timeout=0.25) as handle:
+            handle.sendall(f"{command}\n".encode("utf-8", errors="ignore"))
+
+            if not expect_response:
+                return ""
+
+            handle.settimeout(0.15)
+            chunks = []
+            while True:
+                try:
+                    chunk = handle.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                except (socket.timeout, TimeoutError):
                     break
-        except OSError:
-            continue
 
-        if found:
-            continue
+            return b"".join(chunks).decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
 
-    return sorted(valid_dirs)
+# Play Current File in Playlist
+def play_current_file():
+    if not playlist:
+        return False
+
+    start_vlc_file(playlist[playlist_index])
+    return True
+
+# Play Next File in Playlist
+def play_next_file():
+    global playlist_index
+
+    if not playlist:
+        return False
+
+    playlist_index = (playlist_index + 1) % len(playlist)
+    start_vlc_file(playlist[playlist_index])
+    return True
+
+
+############################
+##### CONFIG FUNCTIONS #####
+############################
 
 # Read INI State
 def ini_get(key, default_value = ""):
@@ -213,6 +274,7 @@ def load_state(dirs):
         return dirs.index(selected_folder)
     return 0
 
+# Save State
 def save_state(index, dirs):
     if index < 0 or index >= len(dirs):
         ini_set("folder", "")
@@ -220,9 +282,38 @@ def save_state(index, dirs):
 
     ini_set("folder", dirs[index])
 
-# Check if File is Audio
-def is_audio_file(filename):
-    return Path(filename).suffix.lower() in AUDIO_EXTENSIONS
+
+###################################
+##### FILE HANDLING FUNCTIONS #####
+###################################
+
+# Get Valid Video Directories
+def list_video_folders():
+    valid_dirs = []
+
+    try:
+        folders = list(USB_PATH.iterdir())
+    except OSError:
+        return valid_dirs
+
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+
+        found = False
+        try:
+            for subpath in folder.rglob("*"):
+                if subpath.is_file() and subpath.suffix.lower() in MEDIA_EXTENSIONS:
+                    valid_dirs.append(folder.name)
+                    found = True
+                    break
+        except OSError:
+            continue
+
+        if found:
+            continue
+
+    return sorted(valid_dirs)
 
 # Get All Media Files in Folder
 def list_media_files(folder_name):
@@ -247,43 +338,9 @@ def build_playlist(folder_name):
     playlist_index = 0
     log_message(f"Playlist Built: {len(playlist)} files")
 
-# Start VLC for Single File
-def start_vlc_file(file_path):
-    global vlc_process
-
-    subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(0.3)
-
-    vlc_command = ["vlc", "--play-and-exit", "--fullscreen", "--no-video-title-show"]
-    if is_audio_file(file_path):
-        vlc_command.append("--audio-visual=visual")
-    vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(file_path)])
-
-    try:
-        log_message(f"Playing: {file_path.name}")
-        vlc_process = subprocess.Popen(vlc_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as error:
-        log_message(f"VLC Start Failed: {error}")
-        vlc_process = None
-
-# Play Next File in Playlist
-def play_next_file():
-    global playlist_index
-
-    if not playlist:
-        return False
-
-    playlist_index = (playlist_index + 1) % len(playlist)
-    start_vlc_file(playlist[playlist_index])
-    return True
-
-# Play Current File in Playlist
-def play_current_file():
-    if not playlist:
-        return False
-
-    start_vlc_file(playlist[playlist_index])
-    return True
+# Check if File is Audio
+def is_audio_file(filename):
+    return Path(filename).suffix.lower() in AUDIO_EXTENSIONS
 
 # Get Current File Name
 def get_current_file_name():
@@ -291,50 +348,10 @@ def get_current_file_name():
         return ""
     return playlist[playlist_index].stem
 
-# Check if VLC is Still Running
-def is_vlc_running():
-    if vlc_process is None:
-        return False
-    return vlc_process.poll() is None
 
-# Kill Running Instances of This Script
-def kill_other_instances():
-    try:
-        subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        result = subprocess.run(["pgrep", "-f", "/boot/nonstoptv.py"], capture_output=True, text=True)
-        for pid_text in result.stdout.split():
-            if not pid_text.isdigit():
-                continue
-            pid = int(pid_text)
-            if pid == os.getpid():
-                continue
-            os.kill(pid, 15)
-    except Exception:
-        pass
-
-# VLC RC Communication
-def vlc_rc_send(command, expect_response=False):
-    try:
-        with socket.create_connection((VLC_RC_HOST, VLC_RC_PORT), timeout=0.25) as handle:
-            handle.sendall(f"{command}\n".encode("utf-8", errors="ignore"))
-
-            if not expect_response:
-                return ""
-
-            handle.settimeout(0.15)
-            chunks = []
-            while True:
-                try:
-                    chunk = handle.recv(4096)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                except (socket.timeout, TimeoutError):
-                    break
-
-            return b"".join(chunks).decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+#########################
+##### LED FUNCTIONS #####
+#########################
 
 # LED Display Scrolling Tick
 def display_tick(seg):
@@ -393,9 +410,11 @@ def show_temporary_message(seg, msg, seconds=LED_TEMP_MESSAGE_SECONDS):
     show_message(seg, msg)
     led_temp_message_until = time.time() + float(seconds)
 
+# Check if Temporary Message is Still Active
 def is_temporary_message_active():
     return time.time() < led_temp_message_until
 
+# Clear Temporary Message and Restore Current File Name
 def clear_temporary_message():
     global led_temp_message_until
 
@@ -410,6 +429,27 @@ def clear_temporary_message():
 kill_other_instances()
 
 print("NonStopTV Script Started")
+
+# Wait for USB Stick to be Mounted
+while not is_usb_ready():
+    print("Waiting for USB")
+    time.sleep(1)
+
+# Get Video Directories
+dirs = list_video_folders()
+while not dirs:
+    print("Searching for Folders")
+    time.sleep(2)
+    dirs = list_video_folders()
+
+# Reset Log File
+try:
+    with LOG_FILE.open("wb") as log:
+        log.write(b"")
+except Exception:
+    pass
+
+log_message("Script Started")
 
 # Load Config
 random_text = ini_get("random", None)
@@ -451,27 +491,6 @@ if ledbrightness_value < 0 or ledbrightness_value > 100:
     ini_set("ledbrightness", "100")
 else:
     ledbrightness = int(round(ledbrightness_value * 2.55))
-
-# Wait for USB Stick to be Mounted
-while not is_usb_ready():
-    print("Waiting for USB")
-    time.sleep(1)
-
-# Get Video Directories
-dirs = list_video_folders()
-while not dirs:
-    print("Searching for Folders")
-    time.sleep(2)
-    dirs = list_video_folders()
-
-# Reset Log File
-try:
-    with LOG_FILE.open("wb") as log:
-        log.write(b"")
-except Exception:
-    pass
-
-log_message("Script Started")
 
 # Wait For X11 Session
 display_value = os.environ.get("DISPLAY", "")
