@@ -409,14 +409,7 @@ def clear_temporary_message():
 # Kill Other Instances
 kill_other_instances()
 
-# Reset Log File
-try:
-    with LOG_FILE.open("wb") as log:
-        log.write(b"")
-except Exception:
-    pass
-
-log_message("Script Started")
+print("NonStopTV Script Started")
 
 # Load Config
 random_text = ini_get("random", None)
@@ -461,15 +454,24 @@ else:
 
 # Wait for USB Stick to be Mounted
 while not is_usb_ready():
-    log_message("Waiting for USB")
+    print("Waiting for USB")
     time.sleep(1)
 
 # Get Video Directories
 dirs = list_video_folders()
 while not dirs:
-    log_message("Searching for Folders")
+    print("Searching for Folders")
     time.sleep(2)
     dirs = list_video_folders()
+
+# Reset Log File
+try:
+    with LOG_FILE.open("wb") as log:
+        log.write(b"")
+except Exception:
+    pass
+
+log_message("Script Started")
 
 # Wait For X11 Session
 display_value = os.environ.get("DISPLAY", "")
