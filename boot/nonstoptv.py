@@ -58,21 +58,19 @@ GPIO.setup(BUTTON_NEXTVIDEO, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_PAUSE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_LANGUAGE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(BUTTON_SKP10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BUTTON_REW10, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-
+G
 ###############################
 ##### ESSENTIAL FUNCTIONS #####
-###############################
+################################## Log Message to Log File
+##################
+##### FUNCTIONS #####
+#####################
 
-# Log Message to Log File
 def log_message(message):
     try:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with LOG_FILE.open("ab") as log:
-            log.write(f"--- {timestamp} | {message}\n".encode("utf-8", errors="ignore"))
-    except Exception:
-        pass
+            log.write(f"--- {timestamp} | {messg
 
 # Kill Running Instances of This Script
 def kill_other_instances():
@@ -98,10 +96,7 @@ def is_usb_ready():
         for _ in USB_PATH.iterdir():
             return True
     except OSError:
-        return False
-
-    return False
-
+        return 
 # Start VLC for Single File
 def start_vlc_file(file_path):
     global vlc_process
@@ -109,7 +104,7 @@ def start_vlc_file(file_path):
     subprocess.run(["pkill", "vlc"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.3)
 
-    vlc_command = ["vlc", "--play-and-exit", "--fullscreen", "--no-video-title-show"]
+    vlc_command = ["vlc", "--play-and-exit", "--fullscreen", "--no-video-title-show", "--volume=256"]
     if is_audio_file(file_path):
         vlc_command.append("--audio-visual=visual")
     vlc_command.extend(["--extraintf", "rc", "--rc-host", f"{VLC_RC_HOST}:{VLC_RC_PORT}", str(file_path)])
@@ -119,14 +114,12 @@ def start_vlc_file(file_path):
         vlc_process = subprocess.Popen(vlc_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as error:
         log_message(f"VLC Start Failed: {error}")
-        vlc_process = None
-
+        v
 # Check if VLC is Still Running
 def is_vlc_running():
     if vlc_process is None:
         return False
-    return vlc_process.poll() is None
-
+    return vlc_process.poll() is  None
 # VLC RC Communication
 def vlc_rc_send(command, expect_response=False):
     try:
@@ -148,8 +141,7 @@ def vlc_rc_send(command, expect_response=False):
                     break
 
             return b"".join(chunks).decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+    except xcepti None
 
 # Play Current File in Playlist
 def play_current_file():
@@ -169,12 +161,16 @@ def play_next_file():
     playlist_index = (playlist_index + 1) % len(playlist)
     start_vlc_file(playlist[playlist_index])
     return True
+on:
+        return ""
+lc_process = None
+False
 
+    re
 
 ############################
-##### CONFIG FUNCTIONS #####
-############################
-
+###CONFIGIAL FUNCTIONS #####
+########################
 # Read INI State
 def ini_get(key, default_value = ""):
     if not STATE_FILE.exists():
@@ -282,11 +278,15 @@ def save_state(index, dirs):
 
     ini_set("folder", dirs[index])
 
+####NS
+treturn sorted(valid_dirs)
+urn False
+
+
+
 
 ###################################
-##### FILE HANDLING FUNCTIONS #####
-###################################
-
+#FILE HANDLINGNTIAL FUNCTI
 # Get Valid Video Directories
 def list_video_folders():
     valid_dirs = []
@@ -305,16 +305,7 @@ def list_video_folders():
             for subpath in folder.rglob("*"):
                 if subpath.is_file() and subpath.suffix.lower() in MEDIA_EXTENSIONS:
                     valid_dirs.append(folder.name)
-                    found = True
-                    break
-        except OSError:
-            continue
-
-        if found:
-            continue
-
-    return sorted(valid_dirs)
-
+                    found
 # Get All Media Files in Folder
 def list_media_files(folder_name):
     folder_path = USB_PATH / folder_name
@@ -336,22 +327,29 @@ def build_playlist(folder_name):
     if RANDOM and playlist:
         random.shuffle(playlist)
     playlist_index = 0
-    log_message(f"Playlist Built: {len(playlist)} files")
-
-# Check if File is Audio
-def is_audio_file(filename):
-    return Path(filename).suffix.lower() in AUDIO_EXTENSIONS
-
+    log_message(f"Playlist Built: {len(playlist} files")
+ = True
+                    break
+        except 
 # Get Current File Name
 def get_current_file_name():
     if not playlist or playlist_index >= len(playlist):
         return ""
     return playlist[playlist_index].stem
+OSError:
+            continue
+
+        if found:
+            continue
 
 
-#########################
-##### LED FUNCTIONS #####
-#########################
+# Check if File is Audio
+def is_audio_file(filename):
+    return Path(filename).suffix.lower() in AUDIO_EXTENSIONS
+    return sorted(valid_dirs)
+
+ONS #####
+###############################
 
 # LED Display Scrolling Tick
 def display_tick(seg):
@@ -408,13 +406,30 @@ def show_temporary_message(seg, msg, seconds=LED_TEMP_MESSAGE_SECONDS):
     global led_temp_message_until
 
     show_message(seg, msg)
+    led_temp_message_until = time.time() + float(secds)
+
+# Check if Temporary Messa("--aual playlist_index
+
+    if not playlicket.create_connection((VLC_RC_HOST, VLC_RC_PORT), timeout=0.25) as handle:
+            handle.sendall(f"{command}\n".encode("utf-8", errors="ignore"))
+
+            if not expect_response:
+                return ""
+
+            handle.sndex = 0
+    led_scroll_next_time = 0
+    seg.text = led_scroll_text[:width]
+
+# Show Temporary Message on LED Display
+def show_temporary_message(seg, msg, seconds=LED_TEMP_MESSAGE_SECONDS):
+    global led_temp_message_until
+
+    show_message(seg, msg)
     led_temp_message_until = time.time() + float(seconds)
 
-# Check if Temporary Message is Still Active
 def is_temporary_message_active():
     return time.time() < led_temp_message_until
 
-# Clear Temporary Message and Restore Current File Name
 def clear_temporary_message():
     global led_temp_message_until
 

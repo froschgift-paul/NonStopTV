@@ -19,6 +19,7 @@ A python script that autostarts VLC player (in Fullscreen) and plays videos (ran
 
 ## Setup
 As the script is built for a Raspberry Pi 2 with Buster, this setup may be different for newer systems. Good luck.
+Note that this guide was written while the system was invented, tested and debugged. So there may be some minor issues I am happy to fix if you report inconsistencies.
 
 ### 1. Craft Hardware
 1. Get old Raspberry Pi
@@ -29,15 +30,17 @@ As the script is built for a Raspberry Pi 2 with Buster, this setup may be diffe
 1. Format sd card (exFAT)
 2. Install linux (easyest via Raspberry Pi Imager)
 3. Install `vlc`, `xdotool`,  `spidev` and `luma.led-matrix`
+Note that older Raspberry Pis are not secure enough to be left connected to the internet and should be run offline.
 
 ### 3. Bag Scripts
 1. Copy `nonstoptv.py` to `/boot`
 2. Copy `nonstoptv.desktop` to `/home/pi/.config/autostart`
 
 ### 4. Automount USB Stick
-1. Find out UUID of stick: `sudo blkid /dev/sda1`
-2. Edit `/etc/fstab` with `UUID=[1234-5678]  /media/pi/USB  [format]  defaults,nofail  0  0`
-3. Create mounting point
+1. Format usb stick (exFAT)
+2. Find out UUID of stick: `sudo blkid /dev/sda1`
+3. Edit `/etc/fstab` with `UUID=[1234-5678]  /media/pi/USB  [format]  defaults,nofail  0  0`
+4. Create mounting point
   ```
   sudo mkdir -p /media/pi/USB
   sudo chown pi:pi /media/pi/USB
@@ -46,8 +49,7 @@ As the script is built for a Raspberry Pi 2 with Buster, this setup may be diffe
 Troubleshooting: Note that you need to create a new mounting point if you change your usb stick or format it!
 
 ### 5. Gather Videos
-1. Format usb stick (exFAT)
-2. Fill with videos (with subfolders)
+Fill usb stick with videos (use subfolders)
   ```
   USB/
   ├── Simpsons/
@@ -61,4 +63,4 @@ Troubleshooting: Note that you need to create a new mounting point if you change
 
 ### 6. Enjoy
 Reboot and you should be ready to go.
-(After first Launch you will find an .ini and a .log file in your usb drive where you can view and tweak details).
+(After first launch you will find an .ini and a .log file in your usb drive where you can view and tweak details).
